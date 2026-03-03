@@ -9,9 +9,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Gemini API - проста модель яка точно працює
+// Gemini API - правильний URL без v1beta!
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
 
 async function checkSentence(text) {
     const prompt = `Ти вчитель англійської мови для рівня A2.
@@ -28,6 +28,7 @@ async function checkSentence(text) {
 }`;
 
     try {
+        console.log('Надсилаю запит до Gemini...');
         const response = await axios.post(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
             contents: [{
                 parts: [{
@@ -36,10 +37,8 @@ async function checkSentence(text) {
             }]
         });
 
-        if (!response.data?.candidates?.[0]) {
-            throw new Error('Немає відповіді');
-        }
-
+        console.log('Відповідь отримано');
+        
         const aiResponse = response.data.candidates[0].content.parts[0].text;
         const jsonMatch = aiResponse.match(/\{.*\}/s);
         
@@ -56,7 +55,7 @@ async function checkSentence(text) {
         };
         
     } catch (error) {
-        console.error('Помилка:', error.response?.data || error.message);
+        console.error('Помилка Gemini:', error.response?.data || error.message);
         throw error;
     }
 }
