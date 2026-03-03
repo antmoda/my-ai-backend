@@ -7,12 +7,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors()); // Дозволяє запити з GitHub Pages
+app.use(cors());
 app.use(express.json());
 
-// Gemini API конфігурація
+// Gemini API конфігурація - правильний URL!
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
 // Функція для перевірки речення
 async function checkSentence(text) {
@@ -41,7 +41,6 @@ async function checkSentence(text) {
             }]
         });
 
-        // Перевіряємо чи є відповідь
         if (!response.data || !response.data.candidates || !response.data.candidates[0]) {
             throw new Error('Немає відповіді від Gemini');
         }
@@ -49,7 +48,6 @@ async function checkSentence(text) {
         const aiResponse = response.data.candidates[0].content.parts[0].text;
         console.log('Gemini відповідь:', aiResponse);
         
-        // Знаходимо JSON у відповіді
         const jsonMatch = aiResponse.match(/\{.*\}/s);
         if (jsonMatch) {
             return JSON.parse(jsonMatch[0]);
@@ -68,13 +66,12 @@ async function checkSentence(text) {
     }
 }
 
-// Ендпоінт для перевірки речення
 app.post('/check', async (req, res) => {
     try {
         const { text } = req.body;
         
         if (!text || text.trim().length === 0) {
-            return res.status(400).json({ 
+            return res.json({ 
                 score: 1,
                 level: "A1",
                 mistakes: ["Речення не може бути порожнім"],
@@ -88,7 +85,7 @@ app.post('/check', async (req, res) => {
 
     } catch (error) {
         console.error('Помилка:', error);
-        res.status(500).json({ 
+        res.json({ 
             score: 5,
             level: "A2",
             mistakes: ["Тимчасові технічні проблеми"],
@@ -98,7 +95,6 @@ app.post('/check', async (req, res) => {
     }
 });
 
-// Перевірка роботи сервера
 app.get('/', (req, res) => {
     res.json({ message: 'AI перевірка речень працює!' });
 });
