@@ -6,24 +6,22 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors()); // Дозволяє запити з GitHub Pages
+app.use(cors());
 app.use(express.json());
 
-// DeepSeek API конфігурація
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || 'тут_твій_ключ';
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+// Gemini API конфігурація
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
 
-// Функція для перевірки речення
 async function checkSentence(text) {
     const prompt = `Ти досвідчений вчитель англійської мови для учнів рівня A2.
 
 Речення учня: "${text}"
 
-Проаналізуй це речення. Якщо є помилки, поясни їх УКРАЇНСЬКОЮ МОВОЮ. 
+Проаналізуй це речення. Якщо є помилки, поясни їх УКРАЇНСЬКОЮ МОВОЮ.
 Дай оцінку від 1 до 10.
 
-Формат відповіді ТІЛЬКИ JSON:
+Формат відповіді ТІЛЬКИ JSON (без додаткового тексту):
 {
     "score": (число від 1 до 10),
     "level": "A1/A2/B1",
@@ -33,30 +31,21 @@ async function checkSentence(text) {
 }`;
 
     try {
-        const response = await axios.post(DEEPSEEK_API_URL, {
-            model: "deepseek-chat",
-            messages: [
-                { role: "system", content: "Ти вчитель англійської мови. Відповідай ТІЛЬКИ в JSON форматі." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.7,
-            max_tokens: 500
-        }, {
-            headers: {
-                'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
-                'Content-Type': 'application/json'
-            }
+        const response = await axios.post(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+            contents: [{
+                parts: [{
+                    text: prompt
+                }]
+            }]
         });
 
-        // Отримуємо відповідь
-        const aiResponse = response.data.choices[0].message.content;
+        const aiResponse = response.data.candidates[0].content.parts[0].text;
         
-        // Спробуємо знайти JSON у відповіді
+        // Знаходимо JSON
         const jsonMatch = aiResponse.match(/\{.*\}/s);
         if (jsonMatch) {
             return JSON.parse(jsonMatch[0]);
         } else {
-            // Якщо JSON не знайдено, повертаємо простий об'єкт
             return {
                 score: 5,
                 level: "A2",
@@ -66,23 +55,23 @@ async function checkSentence(text) {
             };
         }
     } catch (error) {
-        console.error('DeepSeek API помилка:', error.response?.data || error.message);
+        console.error('Gemini API помилка:', error.response?.data || error.message);
         throw error;
     }
 }
 
-// Ендпоінт для перевірки речення
 app.post('/check', async (req, res) => {
     try {
         const { text } = req.body;
         
         if (!text || text.trim().length === 0) {
-            return res.status(400).json({ error: 'Введіть речення' });
-        }
-
-        // Обмеження довжини
-        if (text.length > 200) {
-            return res.status(400).json({ error: 'Речення занадто довге (макс 200 символів)' });
+            return res.status(400).json({ 
+                score: 1,
+                level: "A1",
+                mistakes: ["Речення не може бути порожнім"],
+                corrected: "",
+                explanation: "Будь ласка, введіть речення для перевірки."
+            });
         }
 
         const result = await checkSentence(text);
@@ -90,16 +79,16 @@ app.post('/check', async (req, res) => {
 
     } catch (error) {
         console.error('Помилка:', error);
-        res.status(500).json({ 
-            error: 'Сталася помилка при перевірці',
+        res.json({ 
             score: 5,
-            mistakes: ["Спробуйте ще раз пізніше"],
-            explanation: "Вибачте, тимчасові технічні проблеми."
+            level: "A2",
+            mistakes: ["Тимчасові технічні проблеми"],
+            corrected: text,
+            explanation: "Вибачте, сталася помилка. Спробуйте ще раз через хвилинку."
         });
     }
 });
 
-// Перевірка роботи сервера
 app.get('/', (req, res) => {
     res.json({ message: 'AI перевірка речень працює!' });
 });
