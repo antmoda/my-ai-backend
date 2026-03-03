@@ -6,34 +6,28 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Gemini API конфігурація - правильна модель!
+// Gemini API - проста модель яка точно працює
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
 
-// Функція для перевірки речення
 async function checkSentence(text) {
-    const prompt = `Ти досвідчений вчитель англійської мови для учнів рівня A2.
+    const prompt = `Ти вчитель англійської мови для рівня A2.
 
-Речення учня: "${text}"
+Речення: "${text}"
 
-Проаналізуй це речення. Якщо є помилки, поясни їх УКРАЇНСЬКОЮ МОВОЮ.
-Дай оцінку від 1 до 10.
-
-Формат відповіді ТІЛЬКИ JSON (без додаткового тексту):
+Поверни ТІЛЬКИ JSON:
 {
-    "score": (число від 1 до 10),
+    "score": (1-10),
     "level": "A1/A2/B1",
-    "mistakes": ["список помилок простими словами"],
+    "mistakes": ["список помилок"],
     "corrected": "виправлене речення",
-    "explanation": "детальне пояснення українською мовою"
+    "explanation": "пояснення українською"
 }`;
 
     try {
-        console.log('Надсилаю запит до Gemini...');
         const response = await axios.post(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
             contents: [{
                 parts: [{
@@ -42,75 +36,63 @@ async function checkSentence(text) {
             }]
         });
 
-        console.log('Отримано відповідь від Gemini');
-        
-        if (!response.data || !response.data.candidates || !response.data.candidates[0]) {
-            throw new Error('Немає відповіді від Gemini');
+        if (!response.data?.candidates?.[0]) {
+            throw new Error('Немає відповіді');
         }
 
         const aiResponse = response.data.candidates[0].content.parts[0].text;
-        console.log('Gemini відповідь:', aiResponse);
-        
-        // Знаходимо JSON у відповіді
         const jsonMatch = aiResponse.match(/\{.*\}/s);
+        
         if (jsonMatch) {
             return JSON.parse(jsonMatch[0]);
-        } else {
-            // Якщо JSON не знайдено, повертаємо простий об'єкт
-            return {
-                score: 5,
-                level: "A2",
-                mistakes: ["Не вдалося розпізнати помилки"],
-                corrected: text,
-                explanation: aiResponse
-            };
         }
+        
+        return {
+            score: 5,
+            level: "A2",
+            mistakes: ["Формат відповіді неправильний"],
+            corrected: text,
+            explanation: aiResponse
+        };
+        
     } catch (error) {
-        console.error('Gemini API помилка детально:', {
-            status: error.response?.status,
-            data: error.response?.data,
-            message: error.message
-        });
+        console.error('Помилка:', error.response?.data || error.message);
         throw error;
     }
 }
 
-// Ендпоінт для перевірки речення
 app.post('/check', async (req, res) => {
     try {
         const { text } = req.body;
         
-        if (!text || text.trim().length === 0) {
+        if (!text) {
             return res.json({ 
                 score: 1,
                 level: "A1",
-                mistakes: ["Речення не може бути порожнім"],
+                mistakes: ["Порожнє речення"],
                 corrected: "",
-                explanation: "Будь ласка, введіть речення для перевірки."
+                explanation: "Введіть речення"
             });
         }
 
-        console.log('Отримано речення для перевірки:', text);
         const result = await checkSentence(text);
         res.json(result);
 
     } catch (error) {
-        console.error('Загальна помилка:', error);
         res.json({ 
             score: 5,
             level: "A2",
-            mistakes: ["Тимчасові технічні проблеми"],
+            mistakes: ["Технічні проблеми"],
             corrected: req.body?.text || "",
-            explanation: "Вибачте, сталася помилка. Спробуйте ще раз через хвилинку."
+            explanation: "Спробуйте ще раз"
         });
     }
 });
 
-// Перевірка роботи сервера
 app.get('/', (req, res) => {
-    res.json({ message: 'AI перевірка речень працює!' });
+    res.json({ message: 'AI перевірка працює!' });
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 Сервер запущено на порту ${PORT}`);
+    console.log(`🚀 Сервер на порту ${PORT}`);
 });
