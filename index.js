@@ -6,13 +6,15 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// Middleware
+app.use(cors()); // Дозволяє запити з GitHub Pages
 app.use(express.json());
 
 // Gemini API конфігурація
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
 
+// Функція для перевірки речення
 async function checkSentence(text) {
     const prompt = `Ти досвідчений вчитель англійської мови для учнів рівня A2.
 
@@ -39,9 +41,15 @@ async function checkSentence(text) {
             }]
         });
 
+        // Перевіряємо чи є відповідь
+        if (!response.data || !response.data.candidates || !response.data.candidates[0]) {
+            throw new Error('Немає відповіді від Gemini');
+        }
+
         const aiResponse = response.data.candidates[0].content.parts[0].text;
+        console.log('Gemini відповідь:', aiResponse);
         
-        // Знаходимо JSON
+        // Знаходимо JSON у відповіді
         const jsonMatch = aiResponse.match(/\{.*\}/s);
         if (jsonMatch) {
             return JSON.parse(jsonMatch[0]);
@@ -60,6 +68,7 @@ async function checkSentence(text) {
     }
 }
 
+// Ендпоінт для перевірки речення
 app.post('/check', async (req, res) => {
     try {
         const { text } = req.body;
@@ -79,16 +88,17 @@ app.post('/check', async (req, res) => {
 
     } catch (error) {
         console.error('Помилка:', error);
-        res.json({ 
+        res.status(500).json({ 
             score: 5,
             level: "A2",
             mistakes: ["Тимчасові технічні проблеми"],
-            corrected: text,
+            corrected: req.body?.text || "",
             explanation: "Вибачте, сталася помилка. Спробуйте ще раз через хвилинку."
         });
     }
 });
 
+// Перевірка роботи сервера
 app.get('/', (req, res) => {
     res.json({ message: 'AI перевірка речень працює!' });
 });
