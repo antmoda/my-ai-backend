@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Gemini API конфігурація - правильний URL!
+// Gemini API конфігурація - правильна модель!
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
@@ -33,6 +33,7 @@ async function checkSentence(text) {
 }`;
 
     try {
+        console.log('Надсилаю запит до Gemini...');
         const response = await axios.post(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
             contents: [{
                 parts: [{
@@ -41,6 +42,8 @@ async function checkSentence(text) {
             }]
         });
 
+        console.log('Отримано відповідь від Gemini');
+        
         if (!response.data || !response.data.candidates || !response.data.candidates[0]) {
             throw new Error('Немає відповіді від Gemini');
         }
@@ -48,10 +51,12 @@ async function checkSentence(text) {
         const aiResponse = response.data.candidates[0].content.parts[0].text;
         console.log('Gemini відповідь:', aiResponse);
         
+        // Знаходимо JSON у відповіді
         const jsonMatch = aiResponse.match(/\{.*\}/s);
         if (jsonMatch) {
             return JSON.parse(jsonMatch[0]);
         } else {
+            // Якщо JSON не знайдено, повертаємо простий об'єкт
             return {
                 score: 5,
                 level: "A2",
@@ -61,11 +66,16 @@ async function checkSentence(text) {
             };
         }
     } catch (error) {
-        console.error('Gemini API помилка:', error.response?.data || error.message);
+        console.error('Gemini API помилка детально:', {
+            status: error.response?.status,
+            data: error.response?.data,
+            message: error.message
+        });
         throw error;
     }
 }
 
+// Ендпоінт для перевірки речення
 app.post('/check', async (req, res) => {
     try {
         const { text } = req.body;
@@ -80,11 +90,12 @@ app.post('/check', async (req, res) => {
             });
         }
 
+        console.log('Отримано речення для перевірки:', text);
         const result = await checkSentence(text);
         res.json(result);
 
     } catch (error) {
-        console.error('Помилка:', error);
+        console.error('Загальна помилка:', error);
         res.json({ 
             score: 5,
             level: "A2",
@@ -95,6 +106,7 @@ app.post('/check', async (req, res) => {
     }
 });
 
+// Перевірка роботи сервера
 app.get('/', (req, res) => {
     res.json({ message: 'AI перевірка речень працює!' });
 });
