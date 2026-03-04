@@ -10,29 +10,30 @@ app.use(cors());
 app.use(express.json());
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-// Використовуємо Gemma 3 (або можна повернути Gemini 2.5 Flash)
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent';
 
 async function checkSentence(text, expectedTense = null, sentenceType = null) {
-    // Формуємо промпт з усіма параметрами
+    // Формуємо промпт із чіткою вказівкою на очікуваний тип
     const prompt = `Ти професійний викладач англійської мови.
 
 Речення студента: "${text}"
 Очікуваний час: ${expectedTense || 'не вказано'}
-Очікуваний тип: ${sentenceType || 'positive'} (positive/negative/question)
+Очікуваний тип речення: ${sentenceType || 'positive'} (positive/negative/question)
 
-Завдання:
+ІНСТРУКЦІЯ:
 1. Визнач, який граматичний час ФАКТИЧНО використано.
 2. Визнач, який тип речення ФАКТИЧНО використано (positive/negative/question).
-3. Знайди всі граматичні помилки (якщо є).
-4. Запропонуй виправлений варіант.
+3. Порівняй фактичний час і тип з очікуваними.
+4. Знайди всі граматичні помилки (якщо є).
+5. Якщо фактичний час або тип не збігаються з очікуваними – обов'язково додай це до списку помилок.
+6. Запропонуй виправлений варіант, який відповідає очікуваному часу та типу.
 
 Поверни ТІЛЬКИ JSON без додаткового тексту:
 {
     "detectedTense": "назва часу англійською",
     "detectedType": "positive/negative/question",
-    "mistakes": ["список помилок українською"],
-    "corrected": "виправлене речення",
+    "mistakes": ["список помилок українською. Якщо тип неправильний – обов'язково вкажи це"],
+    "corrected": "виправлене речення, яке відповідає очікуваному часу та типу",
     "explanation": "пояснення українською"
 }`;
 
@@ -55,24 +56,17 @@ async function checkSentence(text, expectedTense = null, sentenceType = null) {
         
         const result = JSON.parse(jsonMatch[0]);
         
-        // --- ВЛАСНА ЛОГІКА ОЦІНЮВАННЯ ---
-        let score = 10;
-        const mistakes = result.mistakes || [];
-        
-        // Визначаємо правильність часу
+        // --- ВЛАСНА ЛОГІКА ОЦІНЮВАННЯ (резервна) ---
         const tenseCorrect = expectedTense ? (result.detectedTense === expectedTense) : true;
-        // Визначаємо правильність типу
         const typeCorrect = sentenceType ? (result.detectedType === sentenceType) : true;
         
+        let score = 10;
         if (!tenseCorrect || !typeCorrect) {
-            // Якщо час або тип неправильні – максимум 4 бали
             score = 4;
         } else {
-            // Якщо час і тип правильні, оцінка залежить від кількості помилок
-            score = Math.max(5, 10 - mistakes.length * 2);
+            score = Math.max(5, 10 - (result.mistakes?.length || 0) * 2);
         }
         
-        // Додаємо поля для фронтенду
         result.score = score;
         result.level = score >= 8 ? 'A2' : (score >= 5 ? 'A2' : 'A1');
         result.tenseCorrect = tenseCorrect;
@@ -130,7 +124,6 @@ app.post('/check', async (req, res) => {
             });
         }
 
-        // Додаємо запит у чергу
         const result = await new Promise((resolve, reject) => {
             rateLimitQueue.push({
                 text,
