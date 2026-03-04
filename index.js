@@ -10,88 +10,109 @@ app.use(cors());
 app.use(express.json());
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+// Використовуємо Gemma 3 (або можна повернути Gemini 2.5 Flash)
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent';
 
-// Оновлена функція з параметрами часу
 async function checkSentence(text, expectedTense = null, sentenceType = null) {
-    // Базовий промпт (для сумісності з words.html)
-    let prompt = `Ти вчитель англійської мови для рівня A2.
-
-Речення: "${text}"
-
-Поверни ТІЛЬКИ JSON:
-{
-    "score": (1-10),
-    "level": "A1/A2/B1",
-    "mistakes": ["список помилок простими словами"],
-    "corrected": "виправлене речення",
-    "explanation": "пояснення українською мовою"
-}`;
-
-    // Якщо передано очікуваний час — використовуємо розширений промпт
-if (expectedTense) {
-    prompt = `Ти професійний викладач англійської мови.
+    // Формуємо промпт з усіма параметрами
+    const prompt = `Ти професійний викладач англійської мови.
 
 Речення студента: "${text}"
-Очікуваний час: "${expectedTense}"
-Очікуваний тип: "${sentenceType || 'positive'}"  (positive/negative/question)
+Очікуваний час: ${expectedTense || 'не вказано'}
+Очікуваний тип: ${sentenceType || 'positive'} (positive/negative/question)
 
 Завдання:
-
 1. Визнач, який граматичний час ФАКТИЧНО використано.
 2. Визнач, який тип речення ФАКТИЧНО використано (positive/negative/question).
-3. Порівняй з очікуваним часом і типом.
-4. Перевір граматику.
-5. Оцінка:
-   - 10/10: ідеально (час і тип правильні, граматика бездоганна)
-   - 8-9/10: час і тип правильні, дрібні помилки
-   - 5-7/10: час правильний, тип правильний, але граматичні помилки
-   - 1-4/10: час або тип неправильний
+3. Знайди всі граматичні помилки (якщо є).
+4. Запропонуй виправлений варіант.
 
-Поверни ТІЛЬКИ JSON:
+Поверни ТІЛЬКИ JSON без додаткового тексту:
 {
-    "score": (1-10),
-    "level": "A1/A2/B1/B2",
-    "detectedTense": "який час знайдено",
+    "detectedTense": "назва часу англійською",
     "detectedType": "positive/negative/question",
-    "tenseCorrect": true/false,
-    "typeCorrect": true/false,
-    "mistakes": ["список помилок"],
+    "mistakes": ["список помилок українською"],
     "corrected": "виправлене речення",
-    "explanation": "пояснення українською мовою"
+    "explanation": "пояснення українською"
 }`;
-}
 
     try {
-        console.log('Надсилаю запит до Gemini...');
+        console.log('Надсилаю запит до AI...');
         const response = await axios.post(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
             contents: [{
                 parts: [{ text: prompt }]
             }],
-            generationConfig: { temperature: 0.2 } // зменшуємо випадковість
+            generationConfig: { temperature: 0.2 }
         });
 
-        console.log('Відповідь отримано');
         const aiResponse = response.data.candidates[0].content.parts[0].text;
-        console.log('Відповідь:', aiResponse);
+        console.log('Відповідь AI:', aiResponse);
         
         const jsonMatch = aiResponse.match(/\{.*\}/s);
-        if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
+        if (!jsonMatch) {
+            throw new Error('Неправильний формат відповіді AI');
         }
         
-        // fallback
-        return {
-            score: 5,
-            level: "A2",
-            mistakes: ["Формат відповіді неправильний"],
-            corrected: text,
-            explanation: aiResponse
-        };
+        const result = JSON.parse(jsonMatch[0]);
         
+        // --- ВЛАСНА ЛОГІКА ОЦІНЮВАННЯ ---
+        let score = 10;
+        const mistakes = result.mistakes || [];
+        
+        // Визначаємо правильність часу
+        const tenseCorrect = expectedTense ? (result.detectedTense === expectedTense) : true;
+        // Визначаємо правильність типу
+        const typeCorrect = sentenceType ? (result.detectedType === sentenceType) : true;
+        
+        if (!tenseCorrect || !typeCorrect) {
+            // Якщо час або тип неправильні – максимум 4 бали
+            score = 4;
+        } else {
+            // Якщо час і тип правильні, оцінка залежить від кількості помилок
+            score = Math.max(5, 10 - mistakes.length * 2);
+        }
+        
+        // Додаємо поля для фронтенду
+        result.score = score;
+        result.level = score >= 8 ? 'A2' : (score >= 5 ? 'A2' : 'A1');
+        result.tenseCorrect = tenseCorrect;
+        result.typeCorrect = typeCorrect;
+        
+        return result;
+
     } catch (error) {
-        console.error('Помилка Gemini:', error.response?.data || error.message);
+        console.error('Помилка AI:', error.response?.data || error.message);
         throw error;
+    }
+}
+
+// Черга для обробки лімітів (429)
+const rateLimitQueue = [];
+let isProcessing = false;
+
+async function processQueue() {
+    if (isProcessing || rateLimitQueue.length === 0) return;
+    isProcessing = true;
+    
+    const { text, expectedTense, sentenceType, resolve, reject } = rateLimitQueue.shift();
+    
+    try {
+        const result = await checkSentence(text, expectedTense, sentenceType);
+        resolve(result);
+    } catch (error) {
+        if (error.response?.status === 429) {
+            // Ліміт – повертаємо в чергу з затримкою
+            setTimeout(() => {
+                rateLimitQueue.push({ text, expectedTense, sentenceType, resolve, reject });
+                isProcessing = false;
+                processQueue();
+            }, 10000);
+        } else {
+            reject(error);
+        }
+    } finally {
+        isProcessing = false;
+        setTimeout(processQueue, 1000);
     }
 }
 
@@ -100,7 +121,7 @@ app.post('/check', async (req, res) => {
         const { text, expectedTense, sentenceType } = req.body;
         
         if (!text) {
-            return res.json({ 
+            return res.json({
                 score: 1,
                 level: "A1",
                 mistakes: ["Порожнє речення"],
@@ -109,13 +130,23 @@ app.post('/check', async (req, res) => {
             });
         }
 
-        // Передаємо параметри (якщо є)
-        const result = await checkSentence(text, expectedTense, sentenceType);
+        // Додаємо запит у чергу
+        const result = await new Promise((resolve, reject) => {
+            rateLimitQueue.push({
+                text,
+                expectedTense,
+                sentenceType,
+                resolve,
+                reject
+            });
+            processQueue();
+        });
+        
         res.json(result);
 
     } catch (error) {
-        console.error('Помилка:', error);
-        res.json({ 
+        console.error('Помилка сервера:', error);
+        res.json({
             score: 5,
             level: "A2",
             mistakes: ["Технічні проблеми"],
