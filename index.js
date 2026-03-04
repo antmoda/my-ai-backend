@@ -13,27 +13,27 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemma-3-27b-it:generateContent';
 
 async function checkSentence(text, expectedTense = null, sentenceType = null) {
-    // Формуємо промпт із чіткою вказівкою на очікуваний тип
     const prompt = `Ти професійний викладач англійської мови.
 
 Речення студента: "${text}"
 Очікуваний час: ${expectedTense || 'не вказано'}
 Очікуваний тип речення: ${sentenceType || 'positive'} (positive/negative/question)
 
-ІНСТРУКЦІЯ:
+ІНСТРУКЦІЯ (виконуй послідовно):
 1. Визнач, який граматичний час ФАКТИЧНО використано.
 2. Визнач, який тип речення ФАКТИЧНО використано (positive/negative/question).
 3. Порівняй фактичний час і тип з очікуваними.
-4. Знайди всі граматичні помилки (якщо є).
-5. Якщо фактичний час або тип не збігаються з очікуваними – обов'язково додай це до списку помилок.
-6. Запропонуй виправлений варіант, який відповідає очікуваному часу та типу.
+4. Якщо час не збігається – додай до списку помилок: "Неправильний час. Очікувався ${expectedTense}, а використано {фактичний час}."
+5. Якщо тип не збігається – додай до списку помилок: "Неправильний тип речення. Очікувався ${sentenceType}, а використано {фактичний тип}."
+6. Знайди всі граматичні помилки (якщо є) і також додай їх.
+7. Запропонуй виправлений варіант, який відповідає очікуваному часу та типу.
 
 Поверни ТІЛЬКИ JSON без додаткового тексту:
 {
     "detectedTense": "назва часу англійською",
     "detectedType": "positive/negative/question",
-    "mistakes": ["список помилок українською. Якщо тип неправильний – обов'язково вкажи це"],
-    "corrected": "виправлене речення, яке відповідає очікуваному часу та типу",
+    "mistakes": ["список помилок українською"],
+    "corrected": "виправлене речення для очікуваного часу та типу",
     "explanation": "пояснення українською"
 }`;
 
@@ -56,7 +56,7 @@ async function checkSentence(text, expectedTense = null, sentenceType = null) {
         
         const result = JSON.parse(jsonMatch[0]);
         
-        // --- ВЛАСНА ЛОГІКА ОЦІНЮВАННЯ (резервна) ---
+        // Додаткова перевірка на випадок, якщо AI не додав помилку про тип
         const tenseCorrect = expectedTense ? (result.detectedTense === expectedTense) : true;
         const typeCorrect = sentenceType ? (result.detectedType === sentenceType) : true;
         
@@ -95,7 +95,6 @@ async function processQueue() {
         resolve(result);
     } catch (error) {
         if (error.response?.status === 429) {
-            // Ліміт – повертаємо в чергу з затримкою
             setTimeout(() => {
                 rateLimitQueue.push({ text, expectedTense, sentenceType, resolve, reject });
                 isProcessing = false;
