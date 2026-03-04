@@ -9,12 +9,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Gemini API - використовуємо models/gemini-2.5-flash (найновіша)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent';
 
-async function checkSentence(text) {
-    const prompt = `Ти вчитель англійської мови для рівня A2.
+// Оновлена функція з параметрами часу
+async function checkSentence(text, expectedTense = null, sentenceType = null) {
+    // Базовий промпт (для сумісності з words.html)
+    let prompt = `Ти вчитель англійської мови для рівня A2.
 
 Речення: "${text}"
 
@@ -27,27 +28,54 @@ async function checkSentence(text) {
     "explanation": "пояснення українською мовою"
 }`;
 
+    // Якщо передано очікуваний час — використовуємо розширений промпт
+    if (expectedTense) {
+        prompt = `Ти професійний викладач англійської мови.
+
+Речення студента: "${text}"
+Очікуваний час: "${expectedTense}"
+Тип речення: "${sentenceType || 'positive'}"
+
+Завдання:
+
+1. Визнач, який граматичний час ФАКТИЧНО використано.
+2. Порівняй його з очікуваним часом.
+3. Перевір граматику.
+4. Якщо час неправильний — суттєво зменш оцінку (максимум 4/10).
+5. Якщо час правильний, але є граматичні помилки — 5-7/10.
+6. Якщо все правильно — 8-10/10.
+
+Поверни ТІЛЬКИ JSON у такому форматі:
+{
+    "score": (1-10),
+    "level": "A1/A2/B1/B2",
+    "detectedTense": "який час знайдено",
+    "tenseCorrect": true/false,
+    "mistakes": ["список помилок"],
+    "corrected": "виправлене речення",
+    "explanation": "пояснення українською мовою"
+}`;
+    }
+
     try {
         console.log('Надсилаю запит до Gemini...');
         const response = await axios.post(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
             contents: [{
-                parts: [{
-                    text: prompt
-                }]
-            }]
+                parts: [{ text: prompt }]
+            }],
+            generationConfig: { temperature: 0.2 } // зменшуємо випадковість
         });
 
         console.log('Відповідь отримано');
-        
         const aiResponse = response.data.candidates[0].content.parts[0].text;
         console.log('Відповідь:', aiResponse);
         
         const jsonMatch = aiResponse.match(/\{.*\}/s);
-        
         if (jsonMatch) {
             return JSON.parse(jsonMatch[0]);
         }
         
+        // fallback
         return {
             score: 5,
             level: "A2",
@@ -64,7 +92,7 @@ async function checkSentence(text) {
 
 app.post('/check', async (req, res) => {
     try {
-        const { text } = req.body;
+        const { text, expectedTense, sentenceType } = req.body;
         
         if (!text) {
             return res.json({ 
@@ -76,7 +104,8 @@ app.post('/check', async (req, res) => {
             });
         }
 
-        const result = await checkSentence(text);
+        // Передаємо параметри (якщо є)
+        const result = await checkSentence(text, expectedTense, sentenceType);
         res.json(result);
 
     } catch (error) {
